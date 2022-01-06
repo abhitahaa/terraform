@@ -97,7 +97,83 @@ resource "aws_security_group" "jenkins_test_sg" {
     Name = "mainjenkinsreposg"
   }
 }
+resource "aws_security_group" "vprofile_app_stg_sg" {
+  name        = "application backend staging"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.main.id
 
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+
+  }
+  ingress {
+    description = "All Traffic"
+    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+    self        = true
+
+  }
+  ingress {
+    description = "SSH"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+
+  }
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Name = "vprofile_app_staging"
+  }
+}
+resource "aws_security_group" "windows_server_sg" {
+  name        = "windows server selenium"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "RDP"
+    from_port   = 3389
+    to_port     = 3389
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+
+  }
+  ingress {
+    description = "All Traffic"
+    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+    self        = true
+
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Name = "vprofile_windowsselenium"
+  }
+}
 resource "aws_security_group" "nexusrepo_test_sg" {
   name        = "mainnexusreposg"
   description = "Allow TLS inbound traffic"
@@ -173,7 +249,7 @@ resource "aws_security_group" "sonar_test_sg" {
   }
 }
 
-#allowing jenkins secuity group in nexus security group. here source is jenkins and destination is nexus security group. 
+#allowing jenkins security group in nexus security group. here source is jenkins and destination is nexus security group.
 resource "aws_security_group_rule" "allow_jenkins_test_sg" {
 
   type                     = "ingress"
@@ -199,6 +275,56 @@ resource "aws_security_group_rule" "allow_nexus_test_sg" {
 
 
 }
+resource "aws_security_group_rule" "allow_jenkins_stg_sg" {
+
+  type                     = "ingress"
+  description              = "SSH"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.vprofile_app_stg_sg.id #to
+  source_security_group_id = aws_security_group.jenkins_test_sg.id     #from
+
+
+}
+
+resource "aws_security_group_rule" "allow_vprofile_app_staging_sg" {
+
+  type                     = "ingress"
+  description              = "SSH"
+  from_port                = 8080
+  to_port                  = 8080
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.jenkins_test_sg.id
+  source_security_group_id = aws_security_group.vprofile_app_stg_sg.id
+
+}
+
+resource "aws_security_group_rule" "allow_jenkins_to_windows_sg" {
+
+  type                     = "ingress"
+  description              = "All traffic"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.windows_server_sg.id #to
+  source_security_group_id = aws_security_group.jenkins_test_sg.id   #from
+
+
+}
+
+resource "aws_security_group_rule" "allow_windows_to_jenkins_sg" {
+
+  type                     = "ingress"
+  description              = "All traffic"
+  from_port                = 0
+  to_port                  = 0
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.jenkins_test_sg.id
+  source_security_group_id = aws_security_group.windows_server_sg.id
+
+}
+
 
 resource "aws_security_group_rule" "allow_sonar_test_sg" {
 
@@ -297,8 +423,62 @@ resource "aws_instance" "nexus_server" {
 
 }
 
+resource "aws_instance" "tomcat_server" {
+
+  ami           = "ami-04505e74c0741db8d"
+  instance_type = var.instance_type[0]
+  #vpc_id                      = aws_vpc.main.id
+  subnet_id                   = aws_subnet.public_subnet.id
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.vprofile_app_stg_sg.id]
+  key_name                    = aws_key_pair.ssh-key.key_name
+
+  user_data = file("tomcat-setup.sh")
 
 
+  tags = {
+    Name = "${var.env_prefix}-tomcat_server"
+  }
+
+}
+
+resource "aws_instance" "backend_staging_server" {
+
+  ami           = "ami-0ed9277fb7eb570c9"
+  instance_type = var.instance_type[0]
+  #vpc_id                      = aws_vpc.main.id
+  subnet_id                   = aws_subnet.public_subnet.id
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.vprofile_app_stg_sg.id]
+  key_name                    = aws_key_pair.ssh-key.key_name
+
+  user_data = file("backend-stack.sh")
+
+
+  tags = {
+    Name = "${var.env_prefix}-backend_staging_server"
+  }
+
+}
+
+resource "aws_instance" "windows_server" {
+
+  ami           = "ami-0d80714a054d3360c"
+  instance_type = var.instance_type[0]
+  #vpc_id                      = aws_vpc.main.id
+  subnet_id                   = aws_subnet.public_subnet.id
+  associate_public_ip_address = true
+  vpc_security_group_ids      = [aws_security_group.windows_server_sg.id]
+  key_name                    = aws_key_pair.ssh-key.key_name
+
+  user_data = file("windows-node.ps1")
+
+
+  tags = {
+    Name = "${var.env_prefix}-backend_staging_server"
+  }
+
+}
 
 
 output "ec2_jenkinspublic_ip" {
@@ -312,6 +492,24 @@ output "ec2_sonarpublic_ip" {
 output "ec2_nexuspublic_ip" {
   value = aws_instance.nexus_server.public_ip
 }
+
+output "ec2_tomcatserver_ip" {
+  value = aws_instance.tomcat_server.public_ip
+}
+
+output "ec2_backendstagingserver_ip" {
+  value = aws_instance.backend_staging_server.public_ip
+}
+
+output "ec2_windowsserver_ip" {
+  value = aws_instance.windows_server.public_ip
+}
+
+
+
+
+
+
 
 
 /*
